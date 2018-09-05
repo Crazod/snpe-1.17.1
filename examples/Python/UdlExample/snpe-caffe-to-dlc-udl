@@ -1,0 +1,125 @@
+#!/usr/bin/env python2.7
+# -*- mode: python -*-
+#=============================================================================
+#
+#  Copyright (c) 2016 Qualcomm Technologies, Inc.
+#  All Rights Reserved.
+#  Confidential and Proprietary - Qualcomm Technologies, Inc.
+#
+#=============================================================================
+
+import sys, os
+import random
+import math
+import logging
+import argparse
+import traceback
+import struct
+
+import caffe
+import caffe.proto.caffe_pb2 as caffe_pb2
+from google.protobuf import text_format
+import numpy
+
+import snpe
+from snpe import snpe_caffe_to_dlc_utils
+from snpe import snpe_caffe_to_dlc
+from snpe.common import snpe_axis_transformer
+from snpe.common import snpe_udl_utils
+AxisAnnotation = snpe_axis_transformer.AxisAnnotation
+
+import MyUdlLayers
+
+class UdlBlobMyCustomScale(object):
+    """
+    Wrapper class for MyCustomScale layer blob
+    """
+    def __init__(self, layer):
+        # MyCustomScale layer reuses the Caffe Scale layer params
+        caffe_params = layer.scale_param
+
+        # Initialize the SNPE params
+        snpe_params = MyUdlLayers.MyCustomScaleLayerParam()
+
+        # fill the params
+        snpe_params.bias_term = caffe_params.bias_term
+
+        # fill the weights
+        caffe_weights = utils.blob2arr(converter.weight_provider.weights_map[layer.name][0])
+        snpe_params.weights_dim = list(caffe_weights.shape)
+        snpe_params.weights_data = list(caffe_weights.astype(float).flat)
+
+        self._blob = snpe_params.Serialize()
+        self._size = len(self._blob)
+
+    def getBlob(self):
+        return self._blob
+
+    def getSize(self):
+        return self._size
+
+
+def udl_mycustomscale_func(layer, input_dims):
+    """
+    Conversion callback function for MyCustomScale layer
+    """
+    # Initialize blob for our custom layer with the wrapper class
+    blob = UdlBlobMyCustomScale(layer)
+    # Input and output dims are the same for MyCustomScale layer
+    return snpe_udl_utils.UdlBlobOutput(blob=blob, out_dims=input_dims)
+
+
+# Instance of Udl class for mycustomscale layer
+udl_mycustomscale = snpe_udl_utils.Udl(udl_mycustomscale_func)
+
+# Add SNPE udl's expected input axis order for 4D input and its output axis order
+udl_mycustomscale.addAxisOrder([AxisAnnotation.BATCH,AxisAnnotation.HEIGHT,AxisAnnotation.WIDTH,AxisAnnotation.CHANNEL],
+                              [AxisAnnotation.BATCH,AxisAnnotation.HEIGHT,AxisAnnotation.WIDTH,AxisAnnotation.CHANNEL])
+# Add SNPE udl's expected input axis order for 3D input and its output axis order
+udl_mycustomscale.addAxisOrder([AxisAnnotation.BATCH,AxisAnnotation.HEIGHT,AxisAnnotation.WIDTH],
+                              [AxisAnnotation.BATCH,AxisAnnotation.HEIGHT,AxisAnnotation.WIDTH])
+# Add SNPE udl's expected input axis order for 2D input and its output axis order
+udl_mycustomscale.addAxisOrder([AxisAnnotation.BATCH,AxisAnnotation.CHANNEL],
+                              [AxisAnnotation.BATCH,AxisAnnotation.CHANNEL])
+
+# As Caffe supports batch dimension, we have an additional dimension here
+# Add Caffe udl's expected input axis order for 4D input and its output axis order
+udl_mycustomscale.addSrcAxisOrder([AxisAnnotation.BATCH, AxisAnnotation.CHANNEL, AxisAnnotation.HEIGHT,AxisAnnotation.WIDTH],
+                                 [AxisAnnotation.BATCH, AxisAnnotation.CHANNEL, AxisAnnotation.HEIGHT,AxisAnnotation.WIDTH])
+# Add Caffe udl's expected input axis order for 3D input and its output axis order
+udl_mycustomscale.addSrcAxisOrder( [AxisAnnotation.CHANNEL,AxisAnnotation.HEIGHT,AxisAnnotation.WIDTH],
+                                  [AxisAnnotation.CHANNEL,AxisAnnotation.HEIGHT,AxisAnnotation.WIDTH])
+# Add Caffe udl's expected input axis order for 2D input and its output axis order
+udl_mycustomscale.addSrcAxisOrder([AxisAnnotation.BATCH, AxisAnnotation.CHANNEL],
+                                 [AxisAnnotation.BATCH, AxisAnnotation.CHANNEL])
+
+# UDL layer name to UDL class map
+udl_supported_types = {
+    'MyCustomScale': udl_mycustomscale
+}
+
+
+if __name__ == '__main__':
+    utils = snpe_caffe_to_dlc_utils.SNPEUtils()
+    args = utils.getArgs()
+    utils.setUpLogger(args.verbose)
+
+    converter = snpe_caffe_to_dlc.CaffeSnapDnnConverter()
+    if not converter.set_udls(udl_supported_types):
+        print 'Failed to set UDL factory'
+        sys.exit(1)
+    try:
+        converter.convert( args.caffe_txt,
+                           args.caffe_bin,
+                           args.dlc,
+                           args.encoding,
+                           args.input_size,
+                           args.input_layers,
+                           args.input_types,
+                           args.enable_preprocessing,
+                           args.model_version,
+                           args.disable_batchnorm_folding )
+    except Exception as e:
+        print 'Encountered Error' + str(e)
+        sys.exit(1)
+    sys.exit(0)
