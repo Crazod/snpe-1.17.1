@@ -1,0 +1,66 @@
+#!/usr/bin/env python2.7
+# -*- mode: python -*-
+#=============================================================================
+#
+#  Copyright (c) 2015-2017 Qualcomm Technologies, Inc.
+#  All Rights Reserved.
+#  Confidential and Proprietary - Qualcomm Technologies, Inc.
+#
+#=============================================================================
+
+import importlib
+import sys
+import traceback
+import os
+
+from snpe import snpe_caffe_to_dlc_utils
+
+def sanitize_converter_command(args):
+    sanitized_args = []
+    for k, v in vars(args).iteritems():
+        if k in ['c', 'b', 'caffe_bin', 'caffe_txt', 'd', 'dlc']:
+            continue
+        sanitized_args.append('{}={}'.format(k, v))
+
+    return "{} {}".format(sys.argv[0].split('/')[-1], ' '.join(sanitized_args))
+
+if __name__ == '__main__':
+    snpeUtils = snpe_caffe_to_dlc_utils.SNPEUtils()
+    args = snpeUtils.getArgs()
+    snpeUtils.setUpLogger(args.verbose)
+
+    # Caffe specific:  Verbose also controls caffe's output with verbose option
+    if not args.verbose:
+        # The levels are
+        # 0 - debug
+        # 1 - info (still a LOT of outputs)
+        # 2 - warnings
+        # 3 - errors
+        os.environ['GLOG_minloglevel'] = '2'
+
+    # import of Caffe has to come after the setting of GLOG_minloglevel for it to take effect
+    from snpe import snpe_caffe_to_dlc
+
+    converter = snpe_caffe_to_dlc.CaffeSnapDnnConverter()
+    try:
+        converter_command = sanitize_converter_command(args)
+        converter.convert( args.caffe_txt,
+                           args.caffe_bin,
+                           args.dlc,
+                           args.encoding,
+                           args.input_size,
+                           args.input_layers,
+                           args.input_types,
+                           args.enable_preprocessing,
+                           args.model_version,
+                           args.disable_batchnorm_folding,
+                           converter_command,
+                           args.validation_target,
+                           args.enable_strict_validation)
+    except Exception as e:
+        print 'Encountered Error:', str(e)
+        print
+        print 'Stack Trace:'
+        traceback.print_exc()
+        sys.exit(1)
+    sys.exit(0)
